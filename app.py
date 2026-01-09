@@ -80,26 +80,65 @@ def load_index():
     """Load the FAISS index and metadata from disk."""
     global faiss_index, metadata
     
-    if not Path(INDEX_FILE).exists():
-        raise FileNotFoundError(
+    # Try multiple possible paths for serverless environments
+    possible_index_paths = [
+        INDEX_FILE,  # Current directory
+        Path(__file__).parent / INDEX_FILE,  # App directory
+        Path.cwd() / INDEX_FILE,  # Working directory
+    ]
+    
+    possible_metadata_paths = [
+        METADATA_FILE,
+        Path(__file__).parent / METADATA_FILE,
+        Path.cwd() / METADATA_FILE,
+    ]
+    
+    index_path = None
+    metadata_path = None
+    
+    for path in possible_index_paths:
+        if Path(path).exists():
+            index_path = path
+            break
+    
+    for path in possible_metadata_paths:
+        if Path(path).exists():
+            metadata_path = path
+            break
+    
+    if not index_path:
+        error_msg = (
             f"Index file '{INDEX_FILE}' not found. "
-            "Please run the indexer script first to create the index."
+            f"Searched in: {[str(p) for p in possible_index_paths]}. "
+            f"Current directory: {Path.cwd()}. "
+            f"Please ensure index files are included in deployment."
         )
+        print(f"ERROR: {error_msg}")
+        raise FileNotFoundError(error_msg)
     
-    if not Path(METADATA_FILE).exists():
-        raise FileNotFoundError(
+    if not metadata_path:
+        error_msg = (
             f"Metadata file '{METADATA_FILE}' not found. "
-            "Please run the indexer script first to create the metadata."
+            f"Searched in: {[str(p) for p in possible_metadata_paths]}. "
+            f"Please ensure metadata files are included in deployment."
         )
+        print(f"ERROR: {error_msg}")
+        raise FileNotFoundError(error_msg)
     
-    # Load FAISS index
-    faiss_index = faiss.read_index(INDEX_FILE)
-    
-    # Load metadata
-    with open(METADATA_FILE, 'rb') as f:
-        metadata = pickle.load(f)
-    
-    print(f"Loaded index with {faiss_index.ntotal} vectors and {len(metadata)} metadata entries")
+    try:
+        # Load FAISS index
+        faiss_index = faiss.read_index(str(index_path))
+        
+        # Load metadata
+        with open(metadata_path, 'rb') as f:
+            metadata = pickle.load(f)
+        
+        print(f"✓ Loaded index from {index_path}")
+        print(f"✓ Loaded metadata from {metadata_path}")
+        print(f"✓ Index contains {faiss_index.ntotal} vectors and {len(metadata)} metadata entries")
+    except Exception as e:
+        print(f"ERROR loading index: {e}")
+        raise
 
 
 # Load index on startup
@@ -112,6 +151,9 @@ async def startup_event():
     except FileNotFoundError as e:
         print(f"⚠ Warning: {e}")
         print("  The application will start, but queries will fail until the index is created.")
+    except Exception as e:
+        print(f"⚠ Error loading index: {e}")
+        print("  The application will start, but queries will fail.")
 
 
 # Pydantic models for request/response
